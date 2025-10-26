@@ -1,0 +1,4 @@
+pyTelegramBotAPI
+gspread
+google-auth
+python-dotenv
