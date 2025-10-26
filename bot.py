@@ -5,7 +5,7 @@ import json
 import base64
 import threading
 from datetime import datetime
-from flask import Flask
+from flask import Flask, render_template_string
 import telebot
 from telebot import types
 import gspread
@@ -13,13 +13,43 @@ from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
 # ───────────────────────────────────────────────
-# 🔧 Flask mini-server for Render/UptimeRobot
+# 🌐 Flask web server for Render/UptimeRobot + визитка
 # ───────────────────────────────────────────────
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "✅ AlboomX bot is running!"
+    html = """
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>AlboomX Bot</title>
+        <style>
+          body {
+            background: linear-gradient(135deg, #1b335f, #071226);
+            color: white;
+            font-family: 'Inter', sans-serif;
+            text-align: center;
+            padding-top: 100px;
+          }
+          h1 { font-size: 2em; margin-bottom: 0.3em; }
+          p { font-size: 1.2em; opacity: 0.85; }
+          a {
+            color: #ffd700;
+            text-decoration: none;
+            font-weight: 600;
+          }
+          a:hover { text-decoration: underline; }
+        </style>
+      </head>
+      <body>
+        <h1>✅ AlboomX бот работает 24/7</h1>
+        <p>📸 Печать фото &nbsp;•&nbsp; 📚 Фотокниги &nbsp;•&nbsp; 🎓 Выпускные альбомы</p>
+        <p>🌐 <a href="https://alboomx.com" target="_blank">alboomx.com</a></p>
+      </body>
+    </html>
+    """
+    return render_template_string(html)
 
 def run_web():
     app.run(host='0.0.0.0', port=10000)
@@ -38,7 +68,7 @@ ALBUMS_URL = os.getenv("ALBUMS_URL")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
 # ───────────────────────────────────────────────
-# ☁️ Google Sheets Authorization (via Base64)
+# ☁️ Google Sheets via Base64 credentials
 # ───────────────────────────────────────────────
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -52,6 +82,7 @@ try:
     creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+    print("✅ Подключение к Google Sheets успешно")
 except Exception as e:
     raise RuntimeError(f"❌ Ошибка подключения к Google Sheets: {e}")
 
@@ -67,12 +98,6 @@ if not os.path.exists("clients.csv"):
 # 🤖 Telegram Bot Setup
 # ───────────────────────────────────────────────
 bot = telebot.TeleBot(TOKEN)
-
-try:
-    sheet.append_row(["ТЕСТ", "Бот подключён", "-", "-", datetime.now().strftime("%d.%m.%Y %H:%M"), "OK", "-", "System"])
-    print("✅ Подключение к Google Sheets успешно")
-except Exception as e:
-    print("❌ Ошибка подключения к Google Sheets:", e)
 
 # ───────────────────────────────────────────────
 # 📍 Главное меню
@@ -99,7 +124,7 @@ def start(message):
     bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
 
 # ───────────────────────────────────────────────
-# 🧭 Кнопки меню
+# 🧭 Обработка кнопок
 # ───────────────────────────────────────────────
 @bot.message_handler(func=lambda m: True)
 def handle_message(message):
@@ -118,7 +143,7 @@ def handle_message(message):
         bot.send_message(message.chat.id, "Выбери пункт меню 👇", reply_markup=main_menu())
 
 # ───────────────────────────────────────────────
-# 📩 Получение контактов
+# 📩 Контакт клиента
 # ───────────────────────────────────────────────
 def get_contact(message):
     contact = message.text.strip()
