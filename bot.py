@@ -1,6 +1,8 @@
 import os
 import csv
 import re
+import json
+import base64
 from datetime import datetime
 import telebot
 from telebot import types
@@ -16,20 +18,31 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 SITE_URL = os.getenv("SITE_URL")
-ALBUMS_URL = os.getenv("ALBUMS_URL")  # 🔗 новая переменная
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE")
+ALBUMS_URL = os.getenv("ALBUMS_URL")  # 🔗 новый сайт для выпускных альбомов
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
 # ─────────────────────────────────────────────────────
-#  Авторизация Google Sheets
+#  Авторизация Google Sheets через Base64-переменную
 # ─────────────────────────────────────────────────────
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-client = gspread.authorize(creds)
-sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+
+b64 = os.getenv("SERVICE_ACCOUNT_DATA_B64")
+if not b64:
+    raise RuntimeError("❌ Переменная SERVICE_ACCOUNT_DATA_B64 не установлена в Render!")
+
+try:
+    service_account_json = base64.b64decode(b64).decode("utf-8")
+    service_account_info = json.loads(service_account_json)
+    creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+    print("✅ Подключение к Google Sheets успешно")
+except Exception as e:
+    print("❌ Ошибка подключения к Google Sheets:", e)
+    sheet = None
 
 # ─────────────────────────────────────────────────────
-#  CSV-резерв
+#  CSV-резерв (на случай сбоя)
 # ─────────────────────────────────────────────────────
 if not os.path.exists("clients.csv"):
     with open("clients.csv", "w", newline="", encoding="utf-8-sig") as f:
@@ -37,15 +50,9 @@ if not os.path.exists("clients.csv"):
         writer.writerow(["Имя", "Телефон", "Username", "UserID", "Дата", "Статус", "Комментарий", "Менеджер"])
 
 # ─────────────────────────────────────────────────────
-#  Инициализация бота
+#  Инициализация Telegram-бота
 # ─────────────────────────────────────────────────────
 bot = telebot.TeleBot(TOKEN)
-
-try:
-    sheet.append_row(["ТЕСТ", "Бот подключён", "-", "-", datetime.now().strftime("%d.%m.%Y %H:%M"), "OK", "-", "System"])
-    print("✅ Подключение к Google Sheets успешно")
-except Exception as e:
-    print("❌ Ошибка подключения к Google Sheets:", e)
 
 # ─────────────────────────────────────────────────────
 #  Главное меню
@@ -103,7 +110,6 @@ def get_contact(message):
     username = message.from_user.username or "нет username"
     user_id = message.from_user.id
 
-    # Проверяем наличие телефона
     phone_pattern = r"\+?\d[\d\s\-\(\)]{6,}"
     if not re.search(phone_pattern, contact):
         msg = bot.send_message(message.chat.id, "❗ Укажите номер телефона (пример: +77001234567):")
@@ -125,20 +131,21 @@ def get_contact(message):
         ])
 
     # Добавление в Google Sheets
-    try:
-        sheet.append_row([
-            contact.split(",")[0],
-            contact,
-            username,
-            user_id,
-            datetime.now().strftime("%d.%m.%Y %H:%M"),
-            "Новая",
-            "",
-            "—"
-        ])
-    except Exception as e:
-        error_text = f"⚠️ Ошибка при добавлении в Google Sheets:\n{e}"
-        bot.send_message(ADMIN_ID, error_text)
+    if sheet:
+        try:
+            sheet.append_row([
+                contact.split(",")[0],
+                contact,
+                username,
+                user_id,
+                datetime.now().strftime("%d.%m.%Y %H:%M"),
+                "Новая",
+                "",
+                "—"
+            ])
+        except Exception as e:
+            error_text = f"⚠️ Ошибка при добавлении в Google Sheets:\n{e}"
+            bot.send_message(ADMIN_ID, error_text)
 
     # Подтверждение пользователю
     bot.send_message(message.chat.id, "✅ Спасибо! Мы скоро свяжемся с вами 💬", reply_markup=main_menu())
@@ -152,7 +159,7 @@ def get_contact(message):
     )
 
 # ─────────────────────────────────────────────────────
-#  Просмотр и изменение статуса (для менеджеров)
+#  Управление лидами (только админ)
 # ─────────────────────────────────────────────────────
 @bot.message_handler(commands=["lead"])
 def manage_lead(message):
@@ -200,7 +207,7 @@ def manage_lead(message):
         bot.send_message(message.chat.id, f"⚠️ Ошибка: {e}")
 
 # ─────────────────────────────────────────────────────
-#  Обработка изменения статуса
+#  Изменение статуса лида
 # ─────────────────────────────────────────────────────
 @bot.callback_query_handler(func=lambda call: call.data.startswith("status_"))
 def change_status(call):
@@ -220,6 +227,10 @@ def change_status(call):
 # ─────────────────────────────────────────────────────
 #  Запуск
 # ─────────────────────────────────────────────────────
-bot.send_message(ADMIN_ID, "✅ Бот успешно запущен и подключён к Google Sheets!")
+try:
+    bot.send_message(ADMIN_ID, "✅ Бот успешно запущен и подключён к Google Sheets!")
+except Exception:
+    print("⚠️ Не удалось отправить сообщение админу.")
+
 print("✅ Бот запущен и слушает сообщения...")
 bot.polling(none_stop=True)
